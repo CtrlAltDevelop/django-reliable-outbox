@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import socket
 import threading
 import time
@@ -12,6 +13,7 @@ import traceback
 from django.db import DatabaseError, connections, transaction
 
 from . import queries
+from .backoff import retry_delay
 from .conf import get_settings
 from .destinations import get_destination
 from .jobs import get_job
@@ -56,6 +58,9 @@ class Worker:
         self.lease_seconds = lease_seconds or config.LEASE_SECONDS
         self.poll_interval = poll_interval or config.POLL_INTERVAL
         self.stop_event = stop_event or threading.Event()
+        self._backoff_base = config.BACKOFF_BASE_SECONDS
+        self._backoff_cap = config.BACKOFF_MAX_SECONDS
+        self._rng = random.Random()  # noqa: S311 - jitter, not cryptography
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -129,24 +134,34 @@ class Worker:
 
     def _handle_failure(self, claim: Claim, exc: Exception) -> None:
         envelope = claim.envelope
-        dead = claim.attempts >= envelope.max_attempts
-        recorded = queries.record_failure(
-            self.alias,
-            claim,
-            worker=self.name,
-            error=f"{type(exc).__name__}: {exc}",
-            traceback="".join(traceback.format_exception(exc))[-_TRACEBACK_LIMIT:],
-            dead=dead,
-        )
+        error = f"{type(exc).__name__}: {exc}"
+        trace = "".join(traceback.format_exception(exc))[-_TRACEBACK_LIMIT:]
+        if claim.attempts >= envelope.max_attempts:
+            recorded = queries.mark_dead(
+                self.alias, claim, worker=self.name, error=error, traceback=trace
+            )
+            outcome = "dead-lettered"
+        else:
+            delay = retry_delay(
+                claim.backoff,
+                claim.attempts,
+                base=self._backoff_base,
+                cap=self._backoff_cap,
+                rng=self._rng,
+            )
+            recorded = queries.schedule_retry(
+                self.alias, claim, worker=self.name, delay=delay, error=error, traceback=trace
+            )
+            outcome = f"retrying in {delay:.2f}s"
         if not recorded:
             logger.warning("Lease on %s expired before its failure was recorded", envelope.name)
             return
         logger.warning(
-            "%s %s failed on attempt %d/%d%s",
+            "%s %s failed on attempt %d/%d, %s",
             envelope.name,
             envelope.message_id,
             claim.attempts,
             envelope.max_attempts,
-            " and is dead" if dead else "",
+            outcome,
             exc_info=exc,
         )

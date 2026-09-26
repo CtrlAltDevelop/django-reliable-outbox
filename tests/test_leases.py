@@ -71,8 +71,9 @@ def test_expired_lease_can_be_reclaimed_and_the_late_ack_is_refused() -> None:
 
     # w1 wakes up and tries to finish: the fence rejects both outcomes.
     assert not queries.mark_delivered("default", stale, worker="w1")
-    assert not queries.record_failure(
-        "default", stale, worker="w1", error="x", traceback="", dead=True
+    assert not queries.mark_dead("default", stale, worker="w1", error="x", traceback="")
+    assert not queries.schedule_retry(
+        "default", stale, worker="w1", delay=0, error="x", traceback=""
     )
     assert queries.mark_delivered("default", fresh, worker="w2")
 

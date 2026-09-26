@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+import time
+from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
-from reliable_outbox.models import OutboxMessage
+from django.db.models import Q
+from django.db.models.functions import Now
+
+from reliable_outbox.models import OutboxMessage, Status
 from reliable_outbox.worker import Worker
 
 
@@ -29,17 +34,30 @@ def make_messages(
     )
 
 
-def drain(**worker_options: Any) -> Worker:
+def due_soon() -> bool:
+    """Is anything unleased going to become claimable within the next second?"""
+    return (
+        OutboxMessage.objects.filter(
+            status=Status.PENDING, run_at__lte=Now() + timedelta(seconds=1)
+        )
+        .filter(Q(locked_until__isnull=True) | Q(locked_until__lt=Now()))
+        .exists()
+    )
+
+
+def drain(timeout: float = 15.0, **worker_options: Any) -> Worker:
+    """Run a worker until nothing is due soon, riding out the tests' short backoffs."""
     worker = Worker(**worker_options)
-    worker.run(burst=True)
-    return worker
+    deadline = time.monotonic() + timeout
+    while True:
+        worker.run(burst=True)
+        if not due_soon() or time.monotonic() > deadline:
+            return worker
+        time.sleep(0.02)
 
 
-def statuses(messages: Iterable[OutboxMessage] | None = None) -> dict[str, int]:
-    rows = OutboxMessage.objects.all()
-    if messages is not None:
-        rows = rows.filter(pk__in=[m.pk for m in messages])
+def statuses() -> dict[str, int]:
     counts: dict[str, int] = {}
-    for status in rows.values_list("status", flat=True):
+    for status in OutboxMessage.objects.values_list("status", flat=True):
         counts[status] = counts.get(status, 0) + 1
     return counts

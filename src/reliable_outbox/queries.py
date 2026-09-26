@@ -112,23 +112,41 @@ def mark_delivered(alias: str, claim: Claim, *, worker: str) -> bool:
         return bool(cursor.rowcount == 1)
 
 
-def record_failure(
-    alias: str, claim: Claim, *, worker: str, error: str, traceback: str, dead: bool
+def schedule_retry(
+    alias: str, claim: Claim, *, worker: str, delay: float, error: str, traceback: str
 ) -> bool:
-    """Release a failed message for another attempt, or park it as dead."""
+    """Put a failed message back in the queue, not to be claimed for ``delay`` seconds."""
     with connections[alias].cursor() as cursor:
         cursor.execute(
             f"""
             UPDATE {TABLE}
-            SET status = CASE WHEN %(dead)s THEN 'dead' ELSE 'pending' END,
-                completed_at = CASE WHEN %(dead)s THEN now() END,
+            SET run_at = now() + make_interval(secs => %(delay)s),
                 locked_until = NULL,
                 locked_by = '',
                 last_error = %(error)s,
                 last_traceback = %(traceback)s
             WHERE {_FENCE}
             """,
-            {"dead": dead, "error": error, "traceback": traceback, **_fence(claim, worker)},
+            {"delay": delay, "error": error, "traceback": traceback, **_fence(claim, worker)},
+        )
+        return bool(cursor.rowcount == 1)
+
+
+def mark_dead(alias: str, claim: Claim, *, worker: str, error: str, traceback: str) -> bool:
+    """Park a message that has run out of attempts; only a requeue brings it back."""
+    with connections[alias].cursor() as cursor:
+        cursor.execute(
+            f"""
+            UPDATE {TABLE}
+            SET status = 'dead',
+                completed_at = now(),
+                locked_until = NULL,
+                locked_by = '',
+                last_error = %(error)s,
+                last_traceback = %(traceback)s
+            WHERE {_FENCE}
+            """,
+            {"error": error, "traceback": traceback, **_fence(claim, worker)},
         )
         return bool(cursor.rowcount == 1)
 
