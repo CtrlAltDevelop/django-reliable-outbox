@@ -10,13 +10,17 @@ __version__ = "0.1.0"
 # Django imports this package while it is still loading apps, before models
 # may be touched, so the public names are resolved on first use instead.
 _EXPORTS = {
-    "publish": "reliable_outbox.publishing",
+    "Envelope": "reliable_outbox.envelope",
+    "handler": "reliable_outbox.handlers",
     "job": "reliable_outbox.jobs",
+    "publish": "reliable_outbox.publishing",
 }
 
-__all__ = ["__version__", "job", "publish"]
+__all__ = ["Envelope", "__version__", "handler", "job", "publish"]
 
 if TYPE_CHECKING:
+    from .envelope import Envelope
+    from .handlers import handler
     from .jobs import job
     from .publishing import publish
 
