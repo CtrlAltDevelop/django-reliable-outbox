@@ -6,6 +6,7 @@ import logging
 import os
 import socket
 import threading
+import time
 import traceback
 
 from django.db import DatabaseError, connections, transaction
@@ -20,6 +21,10 @@ from .queries import Claim
 logger = logging.getLogger(__name__)
 
 _TRACEBACK_LIMIT = 20_000
+
+
+class LeaseLost(Exception):
+    """Our lease expired and another worker re-claimed the message mid-run."""
 
 
 def default_worker_name(index: int = 0) -> str:
@@ -79,10 +84,18 @@ class Worker:
 
     def run_once(self) -> int:
         """Claim one batch and process it. Returns how many messages were run."""
+        # Measured from before the claim, so our idea of the deadline is never
+        # later than the database's.
+        deadline = time.monotonic() + self.lease_seconds
         batch = queries.claim(
             self.alias, worker=self.name, limit=self.batch_size, lease_seconds=self.lease_seconds
         )
-        for claim in batch:
+        for index, claim in enumerate(batch):
+            # Don't start a message on a lease that is about to lapse: another
+            # worker could claim it mid-run. Give the rest back instead.
+            if self.stop_event.is_set() or deadline - time.monotonic() < self.lease_seconds / 2:
+                queries.release(self.alias, batch[index:], worker=self.name)
+                return index
             self.process(claim)
         return len(batch)
 
@@ -92,7 +105,17 @@ class Worker:
             # transaction: either both commit or neither does.
             with transaction.atomic(using=self.alias):
                 self._dispatch(claim)
-                queries.mark_delivered(self.alias, claim)
+                if not queries.mark_delivered(self.alias, claim, worker=self.name):
+                    raise LeaseLost
+        except LeaseLost:
+            # Rolling back undoes this run's database writes; the worker that
+            # took over will produce them. Side effects outside the database
+            # have happened twice, which is what at-least-once means.
+            logger.warning(
+                "Lease on %s %s expired mid-run; rolled back",
+                claim.envelope.name,
+                claim.envelope.message_id,
+            )
         except Exception as exc:
             self._handle_failure(claim, exc)
         else:
@@ -107,13 +130,17 @@ class Worker:
     def _handle_failure(self, claim: Claim, exc: Exception) -> None:
         envelope = claim.envelope
         dead = claim.attempts >= envelope.max_attempts
-        queries.record_failure(
+        recorded = queries.record_failure(
             self.alias,
             claim,
+            worker=self.name,
             error=f"{type(exc).__name__}: {exc}",
             traceback="".join(traceback.format_exception(exc))[-_TRACEBACK_LIMIT:],
             dead=dead,
         )
+        if not recorded:
+            logger.warning("Lease on %s expired before its failure was recorded", envelope.name)
+            return
         logger.warning(
             "%s %s failed on attempt %d/%d%s",
             envelope.name,

@@ -88,20 +88,33 @@ def claim(alias: str, *, worker: str, limit: int, lease_seconds: float) -> list[
     return sorted(claims, key=lambda c: c.id)
 
 
-def mark_delivered(alias: str, claim: Claim) -> bool:
+# Every write-back is fenced on (id, attempts, locked_by). If this worker's
+# lease expired and another worker re-claimed the row, attempts has moved on,
+# the UPDATE matches nothing, and the stale worker learns it no longer owns it.
+_FENCE = "id = %(id)s AND attempts = %(attempts)s AND locked_by = %(worker)s AND status = 'pending'"
+
+
+def _fence(claim: Claim, worker: str) -> dict[str, int | str]:
+    return {"id": claim.id, "attempts": claim.attempts, "worker": worker}
+
+
+def mark_delivered(alias: str, claim: Claim, *, worker: str) -> bool:
+    """Acknowledge a message. False means the lease was lost to another worker."""
     with connections[alias].cursor() as cursor:
         cursor.execute(
             f"""
             UPDATE {TABLE}
             SET status = 'delivered', completed_at = now(), locked_until = NULL
-            WHERE id = %s AND status = 'pending'
+            WHERE {_FENCE}
             """,
-            [claim.id],
+            _fence(claim, worker),
         )
         return bool(cursor.rowcount == 1)
 
 
-def record_failure(alias: str, claim: Claim, *, error: str, traceback: str, dead: bool) -> bool:
+def record_failure(
+    alias: str, claim: Claim, *, worker: str, error: str, traceback: str, dead: bool
+) -> bool:
     """Release a failed message for another attempt, or park it as dead."""
     with connections[alias].cursor() as cursor:
         cursor.execute(
@@ -113,8 +126,30 @@ def record_failure(alias: str, claim: Claim, *, error: str, traceback: str, dead
                 locked_by = '',
                 last_error = %(error)s,
                 last_traceback = %(traceback)s
-            WHERE id = %(id)s AND status = 'pending'
+            WHERE {_FENCE}
             """,
-            {"dead": dead, "error": error, "traceback": traceback, "id": claim.id},
+            {"dead": dead, "error": error, "traceback": traceback, **_fence(claim, worker)},
         )
         return bool(cursor.rowcount == 1)
+
+
+def release(alias: str, claims: list[Claim], *, worker: str) -> int:
+    """Hand back claimed messages that were never started, refunding the attempt."""
+    if not claims:
+        return 0
+    with connections[alias].cursor() as cursor:
+        cursor.execute(
+            f"""
+            UPDATE {TABLE} AS u
+            SET locked_until = NULL, locked_by = '', attempts = u.attempts - 1
+            FROM unnest(%(ids)s::bigint[], %(attempts)s::integer[]) AS r(id, attempts)
+            WHERE u.id = r.id AND u.attempts = r.attempts
+              AND u.locked_by = %(worker)s AND u.status = 'pending'
+            """,
+            {
+                "ids": [c.id for c in claims],
+                "attempts": [c.attempts for c in claims],
+                "worker": worker,
+            },
+        )
+        return int(cursor.rowcount)
