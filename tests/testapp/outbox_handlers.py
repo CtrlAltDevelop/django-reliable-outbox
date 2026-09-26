@@ -10,7 +10,7 @@ import threading
 import time
 from collections import Counter
 
-from reliable_outbox import Envelope, handler
+from reliable_outbox import Envelope, PermanentError, handler
 
 from .models import Handled
 
@@ -41,3 +41,8 @@ def record(envelope: Envelope) -> None:
 @handler("audit.*")
 def audit(envelope: Envelope) -> None:
     Handled.objects.create(message_id=envelope.message_id, name=f"audit:{envelope.name}")
+
+
+@handler("test.permanent")
+def permanent(envelope: Envelope) -> None:
+    raise PermanentError("customer 42 no longer exists")

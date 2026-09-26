@@ -11,15 +11,17 @@ __version__ = "0.1.0"
 # may be touched, so the public names are resolved on first use instead.
 _EXPORTS = {
     "Envelope": "reliable_outbox.envelope",
+    "PermanentError": "reliable_outbox.exceptions",
     "handler": "reliable_outbox.handlers",
     "job": "reliable_outbox.jobs",
     "publish": "reliable_outbox.publishing",
 }
 
-__all__ = ["Envelope", "__version__", "handler", "job", "publish"]
+__all__ = ["Envelope", "PermanentError", "__version__", "handler", "job", "publish"]
 
 if TYPE_CHECKING:
     from .envelope import Envelope
+    from .exceptions import PermanentError
     from .handlers import handler
     from .jobs import job
     from .publishing import publish

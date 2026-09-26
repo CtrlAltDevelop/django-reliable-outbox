@@ -16,6 +16,7 @@ from . import queries
 from .backoff import retry_delay
 from .conf import get_settings
 from .destinations import get_destination
+from .exceptions import PermanentError
 from .jobs import get_job
 from .models import Kind
 from .queries import Claim
@@ -136,7 +137,7 @@ class Worker:
         envelope = claim.envelope
         error = f"{type(exc).__name__}: {exc}"
         trace = "".join(traceback.format_exception(exc))[-_TRACEBACK_LIMIT:]
-        if claim.attempts >= envelope.max_attempts:
+        if isinstance(exc, PermanentError) or claim.attempts >= envelope.max_attempts:
             recorded = queries.mark_dead(
                 self.alias, claim, worker=self.name, error=error, traceback=trace
             )
