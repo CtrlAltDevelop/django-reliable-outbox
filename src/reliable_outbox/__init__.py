@@ -11,11 +11,13 @@ __version__ = "0.1.0"
 # may be touched, so the public names are resolved on first use instead.
 _EXPORTS = {
     "publish": "reliable_outbox.publishing",
+    "job": "reliable_outbox.jobs",
 }
 
-__all__ = ["__version__", "publish"]
+__all__ = ["__version__", "job", "publish"]
 
 if TYPE_CHECKING:
+    from .jobs import job
     from .publishing import publish
 
 
