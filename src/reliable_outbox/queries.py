@@ -30,18 +30,27 @@ class Claim:
     envelope: Envelope
 
 
-_CLAIM = f"""
+# A keyed message is claimable only while no older message with the same key
+# is unfinished. That one condition gives per-key FIFO across any number of
+# workers: the head of each key is the only candidate, so two workers can never
+# hold messages of one key at once, while different keys proceed in parallel.
+# "Unfinished" includes dead rows when BLOCK_KEY_ON_DEAD_LETTER is on.
+_CLAIM = """
 WITH claimable AS (
     SELECT m.id
-    FROM {TABLE} AS m
+    FROM {table} AS m
     WHERE m.status = 'pending'
       AND m.run_at <= now()
       AND (m.locked_until IS NULL OR m.locked_until < now())
+      AND (m.key IS NULL OR NOT EXISTS (
+            SELECT 1 FROM {table} AS e
+            WHERE e.key = m.key AND e.id < m.id AND e.status IN ({blocking})
+      ))
     ORDER BY m.id
     LIMIT %(limit)s
     FOR UPDATE OF m SKIP LOCKED
 )
-UPDATE {TABLE} AS u
+UPDATE {table} AS u
 SET locked_until = now() + make_interval(secs => %(lease)s),
     locked_by = %(worker)s,
     attempts = u.attempts + 1
@@ -51,8 +60,15 @@ RETURNING u.id, u.attempts, u.kind, u.destination, u.backoff, u.message_id, u.na
           u.payload::text, u.headers::text, u.key, u.max_attempts, u.created_at
 """
 
+# Literal status lists, not parameters, so the planner can match the partial
+# index on (key, id) WHERE status IN ('pending', 'dead').
+_CLAIM_BLOCK_ON_DEAD = _CLAIM.format(table=TABLE, blocking="'pending', 'dead'")
+_CLAIM_SKIP_DEAD = _CLAIM.format(table=TABLE, blocking="'pending'")
 
-def claim(alias: str, *, worker: str, limit: int, lease_seconds: float) -> list[Claim]:
+
+def claim(
+    alias: str, *, worker: str, limit: int, lease_seconds: float, block_on_dead: bool = True
+) -> list[Claim]:
     """Lease up to ``limit`` due messages to ``worker``, oldest first.
 
     ``SKIP LOCKED`` lets concurrent workers run this at the same time without
@@ -60,8 +76,9 @@ def claim(alias: str, *, worker: str, limit: int, lease_seconds: float) -> list[
     up at claim time, not on failure, so a message that kills its worker every
     time still runs out of attempts instead of looping forever.
     """
+    sql = _CLAIM_BLOCK_ON_DEAD if block_on_dead else _CLAIM_SKIP_DEAD
     with connections[alias].cursor() as cursor:
-        cursor.execute(_CLAIM, {"limit": limit, "lease": lease_seconds, "worker": worker})
+        cursor.execute(sql, {"limit": limit, "lease": lease_seconds, "worker": worker})
         rows = cursor.fetchall()
     claims = [
         Claim(

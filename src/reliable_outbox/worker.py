@@ -59,6 +59,7 @@ class Worker:
         self.lease_seconds = lease_seconds or config.LEASE_SECONDS
         self.poll_interval = poll_interval or config.POLL_INTERVAL
         self.stop_event = stop_event or threading.Event()
+        self._block_on_dead = config.BLOCK_KEY_ON_DEAD_LETTER
         self._backoff_base = config.BACKOFF_BASE_SECONDS
         self._backoff_cap = config.BACKOFF_MAX_SECONDS
         self._rng = random.Random()  # noqa: S311 - jitter, not cryptography
@@ -94,7 +95,11 @@ class Worker:
         # later than the database's.
         deadline = time.monotonic() + self.lease_seconds
         batch = queries.claim(
-            self.alias, worker=self.name, limit=self.batch_size, lease_seconds=self.lease_seconds
+            self.alias,
+            worker=self.name,
+            limit=self.batch_size,
+            lease_seconds=self.lease_seconds,
+            block_on_dead=self._block_on_dead,
         )
         for index, claim in enumerate(batch):
             # Don't start a message on a lease that is about to lapse: another

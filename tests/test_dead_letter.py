@@ -2,6 +2,7 @@ from io import StringIO
 
 import pytest
 from django.core.management import CommandError, call_command
+from django.test import override_settings
 
 from reliable_outbox import publish
 from reliable_outbox.models import OutboxMessage, Status
@@ -67,6 +68,7 @@ def test_requeue_ignores_rows_that_are_not_dead() -> None:
     assert Handled.objects.count() == 1
 
 
+@override_settings(RELIABLE_OUTBOX={"BLOCK_KEY_ON_DEAD_LETTER": False})
 def test_command_filters_and_dry_run() -> None:
     for _ in range(2):
         publish("test.permanent", {}, key="a")
