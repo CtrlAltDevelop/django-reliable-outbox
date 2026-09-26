@@ -76,7 +76,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S311", "PLR0915"]
+"tests/**" = ["S101", "S105", "S311", "PLR0915", "PT012"]
 "bench/**" = ["S311", "S603", "T201", "PLR0915"]
 "example/**" = ["S105"]
 "src/reliable_outbox/migrations/**" = ["RUF", "I001", "E501"]
