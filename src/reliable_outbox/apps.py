@@ -10,6 +10,8 @@ class ReliableOutboxConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
 
     def ready(self) -> None:
+        from . import checks  # noqa: F401, PLC0415 - registers the system checks
+
         # Validate eagerly: a bad setting should stop `runserver`, not the first publish.
         config = get_settings()
         # Jobs and handlers register themselves on import. The worker process

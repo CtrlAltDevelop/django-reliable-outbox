@@ -3,20 +3,20 @@ from __future__ import annotations
 import functools
 import os
 
+import psycopg
 import pytest
-from django.db import OperationalError, connections
+from django.db import connections
 
 
 @functools.cache
 def postgres_unavailable() -> str | None:
     """Why PostgreSQL can't be used, or None when it can."""
-    connection = connections["default"]
+    # Straight through psycopg: pytest-django blocks the ORM during collection.
+    params = connections["default"].get_connection_params()
     try:
-        connection.ensure_connection()
-    except OperationalError as exc:
+        psycopg.connect(**params, connect_timeout=3).close()
+    except psycopg.OperationalError as exc:
         return f"PostgreSQL unreachable ({str(exc).strip().splitlines()[0]})"
-    finally:
-        connection.close()
     return None
 
 

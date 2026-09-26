@@ -79,8 +79,8 @@ ignore = [
 "tests/**" = ["S101", "S105", "S311", "PLR0915"]
 "bench/**" = ["S311", "S603", "T201", "PLR0915"]
 "example/**" = ["S105"]
-"src/reliable_outbox/migrations/**" = ["RUF"]
-"tests/testapp/migrations/**" = ["RUF"]
+"src/reliable_outbox/migrations/**" = ["RUF", "I001", "E501"]
+"tests/testapp/migrations/**" = ["RUF", "I001", "E501"]
 
 [tool.mypy]
 strict = true
