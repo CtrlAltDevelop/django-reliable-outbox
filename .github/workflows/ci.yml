@@ -1,0 +1,115 @@
+# =============================================================================
+# CI: lint, types, build, and the test suite against real PostgreSQL.
+# =============================================================================
+# The owner's reusable python-backend.yml takes one Postgres image and one
+# requirements file, and this library needs a Python x Django x Postgres
+# matrix, so the tests run in a local matrix job. The security gate is the
+# shared one, unchanged.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1" # weekly: catch breakage from new Django/psycopg releases
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  quality:
+    name: Lint, types, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run ruff check . --output-format github
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - name: Audit locked dependencies
+        run: |
+          uv export --locked --no-hashes --no-emit-project > requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt --strict
+      - run: uv build
+      - name: Check the wheel installs and imports without dev tooling
+        run: |
+          python -m venv /tmp/wheel-check
+          /tmp/wheel-check/bin/pip install dist/*.whl
+          /tmp/wheel-check/bin/python -c "import reliable_outbox, sys; print(reliable_outbox.__version__)"
+
+  test:
+    name: Py ${{ matrix.python }} / Django ${{ matrix.django }} / PG ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # A full 3 x 2 x 3 grid is 18 jobs for bugs that live on one axis at a
+      # time. Six entries cover every value of every axis at least twice, and
+      # the oldest and newest of each meet at least once.
+      matrix:
+        include:
+          - { python: "3.12", django: "5.2", postgres: "15" }
+          - { python: "3.12", django: "6.0", postgres: "17" }
+          - { python: "3.13", django: "5.2", postgres: "16" }
+          - { python: "3.13", django: "6.0", postgres: "15" }
+          - { python: "3.14", django: "5.2", postgres: "17" }
+          - { python: "3.14", django: "6.0", postgres: "16" }
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: test_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://test_user:test_pass@localhost:5432/test_db
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - name: Pin Django ${{ matrix.django }}
+        run: uv pip install "Django~=${{ matrix.django }}.0"
+      # --no-sync keeps the pinned Django instead of restoring the lockfile's.
+      - name: Test
+        run: uv run --no-sync pytest -ra
+
+  security:
+    name: Security
+    uses: CtrlAltDevelop/ci-workflows/.github/workflows/security.yml@v1
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    with:
+      languages: '["python"]'

@@ -59,7 +59,7 @@ build-backend = "hatchling.build"
 packages = ["src/reliable_outbox"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/reliable_outbox", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
+include = ["/src/reliable_outbox", "/tests", "/README.md", "/CHANGELOG.md", "/LICENSE"]
 
 [tool.ruff]
 line-length = 100
