@@ -106,7 +106,7 @@ jobs:
 
   security:
     name: Security
-    uses: CtrlAltDevelop/ci-workflows/.github/workflows/security.yml@v1
+    uses: CtrlAltDevelop/ci-workflows/.github/workflows/security.yml@v1.1.1
     permissions:
       contents: read
       security-events: write
