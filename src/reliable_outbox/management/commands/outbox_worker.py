@@ -18,6 +18,13 @@ class Command(BaseCommand):
         parser.add_argument(
             "--burst", action="store_true", help="Exit once nothing is due instead of waiting."
         )
+        parser.add_argument(
+            "--no-notify",
+            dest="notify",
+            action="store_false",
+            default=None,
+            help="Poll only; don't LISTEN for new messages.",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         Worker(
@@ -25,4 +32,5 @@ class Command(BaseCommand):
             batch_size=options["batch_size"],
             lease_seconds=options["lease"],
             poll_interval=options["poll_interval"],
+            notify=options["notify"],
         ).run(burst=options["burst"])

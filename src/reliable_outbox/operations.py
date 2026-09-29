@@ -9,6 +9,7 @@ from django.db.models.functions import Now
 
 from .conf import get_settings
 from .models import OutboxMessage, Status
+from .waiting import notify
 
 
 def requeue(messages: QuerySet[OutboxMessage] | Iterable[int], *, using: str | None = None) -> int:
@@ -23,7 +24,7 @@ def requeue(messages: QuerySet[OutboxMessage] | Iterable[int], *, using: str | N
         rows = messages.using(alias)
     else:
         rows = OutboxMessage.objects.using(alias).filter(pk__in=list(messages))
-    return rows.filter(status=Status.DEAD).update(
+    count = rows.filter(status=Status.DEAD).update(
         status=Status.PENDING,
         attempts=0,
         run_at=Now(),
@@ -31,3 +32,6 @@ def requeue(messages: QuerySet[OutboxMessage] | Iterable[int], *, using: str | N
         locked_by="",
         completed_at=None,
     )
+    if count:
+        notify(alias)
+    return count

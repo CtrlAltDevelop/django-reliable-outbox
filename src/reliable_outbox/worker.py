@@ -20,6 +20,7 @@ from .exceptions import PermanentError
 from .jobs import get_job
 from .models import Kind
 from .queries import Claim
+from .waiting import make_waiter
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class Worker:
         batch_size: int | None = None,
         lease_seconds: float | None = None,
         poll_interval: float | None = None,
+        notify: bool | None = None,
         stop_event: threading.Event | None = None,
     ) -> None:
         config = get_settings()
@@ -59,6 +61,9 @@ class Worker:
         self.lease_seconds = lease_seconds or config.LEASE_SECONDS
         self.poll_interval = poll_interval or config.POLL_INTERVAL
         self.stop_event = stop_event or threading.Event()
+        self._waiter = make_waiter(
+            self.alias, self.stop_event, notify=config.NOTIFY if notify is None else notify
+        )
         self._block_on_dead = config.BLOCK_KEY_ON_DEAD_LETTER
         self._backoff_base = config.BACKOFF_BASE_SECONDS
         self._backoff_cap = config.BACKOFF_MAX_SECONDS
@@ -84,8 +89,9 @@ class Worker:
                     continue
                 if burst:
                     break
-                self.stop_event.wait(self.poll_interval)
+                self._waiter.wait(self.poll_interval)
         finally:
+            self._waiter.close()
             connections[self.alias].close()
             logger.info("Worker %s stopped", self.name)
 
