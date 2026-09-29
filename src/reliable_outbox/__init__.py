@@ -17,9 +17,10 @@ _EXPORTS = {
     "publish": "reliable_outbox.publishing",
 }
 
-__all__ = ["Envelope", "PermanentError", "__version__", "handler", "job", "publish"]
+__all__ = ["Envelope", "PermanentError", "__version__", "handler", "inbox", "job", "publish"]
 
 if TYPE_CHECKING:
+    from . import inbox
     from .envelope import Envelope
     from .exceptions import PermanentError
     from .handlers import handler
@@ -28,6 +29,8 @@ if TYPE_CHECKING:
 
 
 def __getattr__(name: str) -> Any:
+    if name == "inbox":
+        return import_module("reliable_outbox.inbox")
     if name in _EXPORTS:
         return getattr(import_module(_EXPORTS[name]), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

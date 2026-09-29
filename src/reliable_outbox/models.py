@@ -81,3 +81,26 @@ class OutboxMessage(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} #{self.pk} ({self.status})"
+
+
+class InboxMessage(models.Model):
+    """A message a consumer has already processed, for deduplication.
+
+    Delivery is at-least-once, so consumers see some messages twice. Recording
+    ``message_id`` in the same transaction as the consumer's own writes turns
+    "at least once" into "effects at most once" for everything in that database.
+    """
+
+    consumer = models.CharField(max_length=100)
+    message_id = models.CharField(max_length=255)
+    received_at = models.DateTimeField(db_default=Now())
+
+    class Meta:
+        verbose_name = "inbox message"
+        constraints = [
+            models.UniqueConstraint(fields=["consumer", "message_id"], name="inbox_unique_message")
+        ]
+        indexes = [models.Index(fields=["received_at"], name="inbox_received_idx")]
+
+    def __str__(self) -> str:
+        return f"{self.consumer}: {self.message_id}"
