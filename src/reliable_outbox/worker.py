@@ -11,6 +11,7 @@ import time
 import traceback
 
 from django.db import DatabaseError, connections, transaction
+from django.utils import timezone
 
 from . import queries
 from .backoff import retry_delay
@@ -20,6 +21,7 @@ from .exceptions import PermanentError
 from .jobs import get_job
 from .models import Kind
 from .queries import Claim
+from .signals import message_dead_lettered, message_delivered, message_failed
 from .waiting import make_waiter
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ class Worker:
         return len(batch)
 
     def process(self, claim: Claim) -> None:
+        started = time.monotonic()
+        queued_for = (timezone.now() - claim.envelope.created_at).total_seconds()
         try:
             # The handler's own writes and the acknowledgement share one
             # transaction: either both commit or neither does.
@@ -137,6 +141,12 @@ class Worker:
             self._handle_failure(claim, exc)
         else:
             logger.debug("Delivered %s %s", claim.envelope.name, claim.envelope.message_id)
+            message_delivered.send_robust(
+                sender=type(self),
+                envelope=claim.envelope,
+                duration=time.monotonic() - started,
+                queued_for=max(queued_for, 0.0),
+            )
 
     def _dispatch(self, claim: Claim) -> None:
         if claim.kind == Kind.JOB:
@@ -153,6 +163,7 @@ class Worker:
                 self.alias, claim, worker=self.name, error=error, traceback=trace
             )
             outcome = "dead-lettered"
+            retry_in = None
         else:
             delay = retry_delay(
                 claim.backoff,
@@ -165,6 +176,7 @@ class Worker:
                 self.alias, claim, worker=self.name, delay=delay, error=error, traceback=trace
             )
             outcome = f"retrying in {delay:.2f}s"
+            retry_in = delay
         if not recorded:
             logger.warning("Lease on %s expired before its failure was recorded", envelope.name)
             return
@@ -177,3 +189,9 @@ class Worker:
             outcome,
             exc_info=exc,
         )
+        if retry_in is None:
+            message_dead_lettered.send_robust(sender=type(self), envelope=envelope, error=exc)
+        else:
+            message_failed.send_robust(
+                sender=type(self), envelope=envelope, error=exc, retry_in=retry_in
+            )
