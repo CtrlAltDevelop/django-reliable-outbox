@@ -16,7 +16,6 @@ htmlcov/
 # Local environment
 .env
 *.sqlite3
-bench/results/*.json
 
 # Editors
 .idea/

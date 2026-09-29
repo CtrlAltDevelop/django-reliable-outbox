@@ -1,0 +1,57 @@
+{
+  "machine": {
+    "platform": "Windows-11-10.0.28000-SP0",
+    "processor": "Intel64 Family 6 Model 158 Stepping 9, GenuineIntel",
+    "logical_cpus": 8,
+    "python": "3.14.7",
+    "django": "6.0.8",
+    "postgres": "16.15 (Debian 16.15-1.pgdg12+2)",
+    "postgres_fsync": "on",
+    "postgres_synchronous_commit": "on"
+  },
+  "throughput": [
+    {
+      "workers": 1,
+      "messages": 10000,
+      "batch_size": 10,
+      "seconds": 96.585,
+      "messages_per_second": 104
+    },
+    {
+      "workers": 4,
+      "messages": 10000,
+      "batch_size": 10,
+      "seconds": 41.258,
+      "messages_per_second": 242
+    },
+    {
+      "workers": 16,
+      "messages": 10000,
+      "batch_size": 10,
+      "seconds": 11.903,
+      "messages_per_second": 840
+    }
+  ],
+  "latency": [
+    {
+      "mode": "polling",
+      "poll_interval": 1.0,
+      "samples": 200,
+      "p50_ms": 568.2,
+      "p95_ms": 1013.7,
+      "p99_ms": 1085.4,
+      "max_ms": 1120.1,
+      "mean_ms": 556.3
+    },
+    {
+      "mode": "notify",
+      "poll_interval": 1.0,
+      "samples": 200,
+      "p50_ms": 19.0,
+      "p95_ms": 33.5,
+      "p99_ms": 67.3,
+      "max_ms": 133.4,
+      "mean_ms": 20.5
+    }
+  ]
+}

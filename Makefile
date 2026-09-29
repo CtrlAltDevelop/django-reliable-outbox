@@ -35,7 +35,7 @@ pg-up:
 pg-down:
 	docker rm -f outbox-pg
 
-bench:
+bench:  ## needs a PostgreSQL at BENCH_DATABASE_URL (default localhost:55436/bench)
 	uv run python bench/run.py
 
 clean:
