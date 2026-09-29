@@ -67,7 +67,7 @@ target-version = "py312"
 src = ["src", "."]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "DJ", "PT", "S", "C4", "RET", "PL", "TID"]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF", "DJ", "PT", "S", "C4", "RET", "PL", "TID", "T20"]
 ignore = [
     "PLR0913",  # keyword-only arguments are the API; counting them is not useful
     "PLR2004",  # magic values in tests and HTTP status checks read fine
