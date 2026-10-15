@@ -71,6 +71,10 @@ def test_malformed_signature_headers_are_rejected(header: str) -> None:
     assert not verify_signature(b"{}", header, SECRET)
 
 
+def test_non_ascii_signature_is_rejected_not_raised() -> None:
+    assert not verify_signature(b"{}", "t=1,v1=\u00e9", SECRET, now=1)
+
+
 def test_bytes_and_str_secrets_agree() -> None:
     assert sign(b"x", SECRET, timestamp=1) == sign(b"x", SECRET.encode(), timestamp=1)
 
@@ -86,6 +90,13 @@ class Receiver(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers["Content-Length"]))
         Receiver.requests.append((dict(self.headers), body))
         self.send_response(Receiver.status)
+        if 300 <= Receiver.status < 400:
+            self.send_header("Location", "/elsewhere")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        Receiver.requests.append((dict(self.headers), b""))
+        self.send_response(200)
         self.end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
@@ -123,6 +134,15 @@ def test_webhook_status_codes(receiver: str, status: int, error: type[Exception]
     Receiver.status = status
     with pytest.raises(error):
         WebhookDestination(url=receiver, secret=SECRET).deliver(envelope())
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307])
+def test_webhook_redirect_is_not_followed(receiver: str, status: int) -> None:
+    # Following it would replay the POST as a bodiless GET and count a 200 as delivered.
+    Receiver.status = status
+    with pytest.raises(DeliveryError):
+        WebhookDestination(url=receiver, secret=SECRET).deliver(envelope())
+    assert len(Receiver.requests) == 1
 
 
 def test_webhook_unreachable_is_retryable() -> None:

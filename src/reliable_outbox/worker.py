@@ -10,7 +10,7 @@ import threading
 import time
 import traceback
 
-from django.db import DatabaseError, connections, transaction
+from django.db import Error, connections, transaction
 from django.utils import timezone
 
 from . import queries
@@ -27,6 +27,7 @@ from .waiting import make_waiter
 logger = logging.getLogger(__name__)
 
 _TRACEBACK_LIMIT = 20_000
+_NAME_LIMIT = 100  # OutboxMessage.locked_by
 
 
 class LeaseLost(Exception):
@@ -34,7 +35,7 @@ class LeaseLost(Exception):
 
 
 def default_worker_name(index: int = 0) -> str:
-    return f"{socket.gethostname()}:{os.getpid()}:{index}"[:100]
+    return f"{socket.gethostname()}:{os.getpid()}:{index}"[:_NAME_LIMIT]
 
 
 class Worker:
@@ -62,6 +63,10 @@ class Worker:
         self.batch_size = batch_size or config.BATCH_SIZE
         self.lease_seconds = lease_seconds or config.LEASE_SECONDS
         self.poll_interval = poll_interval or config.POLL_INTERVAL
+        if len(self.name) > _NAME_LIMIT:
+            raise ValueError(f"Worker name must be at most {_NAME_LIMIT} characters.")
+        if self.batch_size < 1 or self.lease_seconds <= 0 or self.poll_interval <= 0:
+            raise ValueError("batch_size, lease_seconds and poll_interval must be positive.")
         self.stop_event = stop_event or threading.Event()
         self._waiter = make_waiter(
             self.alias, self.stop_event, notify=config.NOTIFY if notify is None else notify
@@ -81,7 +86,7 @@ class Worker:
             while not self.stop_event.is_set():
                 try:
                     processed = self.run_once()
-                except DatabaseError:
+                except Error:
                     # A dropped connection or failover must not kill the worker.
                     logger.exception("Worker %s lost the database; retrying", self.name)
                     connections[self.alias].close()

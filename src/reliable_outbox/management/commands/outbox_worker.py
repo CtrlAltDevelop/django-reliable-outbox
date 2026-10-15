@@ -62,8 +62,13 @@ class Command(BaseCommand):
                 workers[0].run(burst=options["burst"])
                 return
             threads = [
+                # Daemon, so a second signal really exits instead of waiting
+                # on in-flight messages; their leases expire like a crash.
                 threading.Thread(
-                    target=worker.run, kwargs={"burst": options["burst"]}, name=worker.name
+                    target=worker.run,
+                    kwargs={"burst": options["burst"]},
+                    name=worker.name,
+                    daemon=True,
                 )
                 for worker in workers
             ]

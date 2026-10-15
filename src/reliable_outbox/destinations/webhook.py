@@ -31,6 +31,16 @@ class DeliveryError(Exception):
     """The endpoint could not take the message right now; it will be retried."""
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    # urllib turns a redirected POST into a bodiless GET; a 2xx to that would
+    # mark the message delivered without the receiver ever seeing it.
+    def redirect_request(self, *args: object, **kwargs: object) -> None:
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
 def _key(secret: str | bytes) -> bytes:
     return secret.encode() if isinstance(secret, str) else secret
 
@@ -66,7 +76,8 @@ def verify_signature(
     if abs(current - timestamp) > tolerance:
         return False
     expected = sign(body, secret, timestamp=timestamp).partition("v1=")[2]
-    return hmac.compare_digest(expected, received)
+    # Bytes, because compare_digest raises TypeError on non-ASCII str.
+    return hmac.compare_digest(expected.encode(), received.encode(errors="replace"))
 
 
 class WebhookDestination:
@@ -106,9 +117,10 @@ class WebhookDestination:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout):  # noqa: S310
+            with _opener.open(request, timeout=self.timeout):
                 return
         except urllib.error.HTTPError as exc:
+            exc.close()  # the error is a response too; don't hold its socket
             # Other 4xx means the receiver understood and refused; sending the
             # same bytes again will not change its mind.
             if 400 <= exc.code < 500 and exc.code not in _RETRYABLE_STATUS:

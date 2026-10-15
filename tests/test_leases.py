@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
-from django.db import connection
+from django.db import connection, connections
 
 from reliable_outbox import publish, queries
 from reliable_outbox.models import OutboxMessage, Status
@@ -81,7 +81,14 @@ def test_expired_lease_can_be_reclaimed_and_the_late_ack_is_refused() -> None:
 def test_a_slow_worker_that_lost_its_lease_rolls_back_its_writes() -> None:
     publish("test.record", {"seq": 1, "sleep": 1.0})
     slow = Worker(name="slow", lease_seconds=0.5)
-    thread = threading.Thread(target=slow.run_once)
+
+    def run_slow() -> None:
+        try:
+            slow.run_once()
+        finally:
+            connections.close_all()  # this thread's connection; run() would close it
+
+    thread = threading.Thread(target=run_slow)
     thread.start()
 
     time.sleep(0.7)  # slow's lease has lapsed while its handler still sleeps

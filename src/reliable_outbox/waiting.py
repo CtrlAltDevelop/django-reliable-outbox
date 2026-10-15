@@ -63,7 +63,11 @@ class NotifyWaiter:
         params.pop("cursor_factory", None)
         params.pop("context", None)
         conn = psycopg.connect(**params, autocommit=True)
-        conn.execute(f"LISTEN {CHANNEL}")
+        try:
+            conn.execute(f"LISTEN {CHANNEL}")
+        except BaseException:
+            conn.close()
+            raise
         return conn
 
     def wait(self, timeout: float) -> None:

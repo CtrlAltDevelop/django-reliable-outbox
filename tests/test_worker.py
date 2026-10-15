@@ -123,3 +123,12 @@ def test_registry_is_idempotent_and_ordered(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_worker_names_identify_host_process_and_slot() -> None:
     assert default_worker_name(3).endswith(":3")
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"name": "x" * 101}, {"batch_size": -1}, {"lease_seconds": -5}, {"poll_interval": -1}],
+)
+def test_worker_rejects_options_that_would_break_claims(options: dict[str, object]) -> None:
+    with pytest.raises(ValueError, match="must be"):
+        Worker(**options)  # type: ignore[arg-type]

@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-15
+
+### Fixed
+
+- Webhooks no longer follow redirects. urllib replayed a redirected POST as a
+  bodiless GET, so a 2xx at the new location marked the message delivered
+  without the receiver ever seeing it. A 3xx is now a retryable failure.
+- `verify_signature` returns False for a non-ASCII signature instead of
+  raising `TypeError`.
+- The webhook destination closes error responses instead of leaving their
+  sockets to the garbage collector.
+- The LISTEN connection is closed when `LISTEN` itself fails, instead of
+  leaking one connection per retry.
+- The worker survives `InterfaceError` (e.g. a closed connection) like any
+  other database error, instead of exiting.
+- With `--concurrency` above 1, a second SIGTERM/SIGINT now exits at once, as
+  documented, instead of waiting for in-flight messages.
+- `Worker` rejects a name longer than 100 characters and non-positive batch
+  size, lease or poll interval, which previously failed every claim or let
+  leases expire on creation.
+
 ## [0.1.0] - 2026-09-29
 
 ### Added
@@ -39,5 +60,6 @@ All notable changes to this project are documented here. The format follows
   `message_dead_lettered` signals for metrics.
 - Typed, validated settings under `RELIABLE_OUTBOX`; `py.typed`.
 
-[Unreleased]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/CtrlAltDevelop/django-reliable-outbox/releases/tag/v0.1.0
