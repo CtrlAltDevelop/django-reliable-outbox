@@ -6,3 +6,7 @@ class PermanentError(Exception):
     that will never be valid (a 404 for a deleted customer, a schema mismatch),
     not for outages, which are exactly what retries are for.
     """
+
+
+class JobTimeout(TimeoutError):
+    """A job ran past its ``timeout``. Retried like any other failure."""

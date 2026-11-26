@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
+### Added
+
+- Message priority: `priority=` on `publish`, `enqueue_with` and `@job`. Workers
+  claim the highest priority first, oldest first within a priority; it never
+  lets a message overtake an older one with the same key.
+- Unique and debounced jobs: `enqueue_with(unique_key=..., on_conflict="skip" |
+  "replace")` keeps one pending copy per job name and key. `replace` swaps in
+  the new arguments and schedule unless a worker has the first one leased.
+- Per-job `timeout` (raises `JobTimeout`, retried like any failure; enforced on
+  a worker's main thread only), `retry_on` and `dont_retry_on`.
+- Prometheus (`prometheus` extra) and OpenTelemetry (`opentelemetry` extra)
+  exporters in `reliable_outbox.metrics`: delivery counters and duration
+  histograms from the worker's signals, plus queue-depth and lag gauges.
+
+### Changed
+
+- **License: MIT to AGPL-3.0-only.** Releases up to 0.1.1 remain MIT.
+- Migrations `0004` and `0005` add `priority` and `unique_key` and replace the
+  claim index. The indexes are built `CONCURRENTLY` (0005 is non-atomic), so a
+  large table keeps serving writes. A dead-lettered message releases its
+  `unique_key`.
+- Dependencies refreshed (Django 6.0.10, psycopg 3.3.9, and others).
+
 ## [0.1.1] - 2026-10-15
 
 ### Fixed
@@ -60,6 +85,7 @@ All notable changes to this project are documented here. The format follows
   `message_dead_lettered` signals for metrics.
 - Typed, validated settings under `RELIABLE_OUTBOX`; `py.typed`.
 
-[Unreleased]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/CtrlAltDevelop/django-reliable-outbox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/CtrlAltDevelop/django-reliable-outbox/releases/tag/v0.1.0
