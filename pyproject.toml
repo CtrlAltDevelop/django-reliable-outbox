@@ -3,7 +3,7 @@ name = "django-reliable-outbox"
 version = "0.1.1"
 description = "Transactional outbox and reliable background jobs for Django on PostgreSQL."
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "Mohammad Zarif", email = "m.zarif1996@gmail.com" }]
 requires-python = ">=3.12"
