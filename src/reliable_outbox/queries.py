@@ -34,7 +34,8 @@ class Claim:
 # is unfinished. That one condition gives per-key FIFO across any number of
 # workers: the head of each key is the only candidate, so two workers can never
 # hold messages of one key at once, while different keys proceed in parallel.
-# "Unfinished" includes dead rows when BLOCK_KEY_ON_DEAD_LETTER is on.
+# "Unfinished" includes dead rows when BLOCK_KEY_ON_DEAD_LETTER is on. Priority
+# only orders the candidates: it cannot lift a message past an older one of its key.
 _CLAIM = """
 WITH claimable AS (
     SELECT m.id
@@ -46,7 +47,7 @@ WITH claimable AS (
             SELECT 1 FROM {table} AS e
             WHERE e.key = m.key AND e.id < m.id AND e.status IN ({blocking})
       ))
-    ORDER BY m.id
+    ORDER BY m.priority DESC, m.id
     LIMIT %(limit)s
     FOR UPDATE OF m SKIP LOCKED
 )
@@ -57,7 +58,7 @@ SET locked_until = now() + make_interval(secs => %(lease)s),
 FROM claimable
 WHERE u.id = claimable.id
 RETURNING u.id, u.attempts, u.kind, u.destination, u.backoff, u.message_id, u.name,
-          u.payload::text, u.headers::text, u.key, u.max_attempts, u.created_at
+          u.payload::text, u.headers::text, u.key, u.max_attempts, u.created_at, u.priority
 """
 
 # Literal status lists, not parameters, so the planner can match the partial
@@ -69,7 +70,7 @@ _CLAIM_SKIP_DEAD = _CLAIM.format(table=TABLE, blocking="'pending'")
 def claim(
     alias: str, *, worker: str, limit: int, lease_seconds: float, block_on_dead: bool = True
 ) -> list[Claim]:
-    """Lease up to ``limit`` due messages to ``worker``, oldest first.
+    """Lease up to ``limit`` due messages to ``worker``: highest priority, then oldest.
 
     ``SKIP LOCKED`` lets concurrent workers run this at the same time without
     waiting on, or double-claiming, each other's rows. The attempt counter goes
@@ -80,7 +81,11 @@ def claim(
     with connections[alias].cursor() as cursor:
         cursor.execute(sql, {"limit": limit, "lease": lease_seconds, "worker": worker})
         rows = cursor.fetchall()
-    claims = [
+    # RETURNING has no defined order; hand them back in run order. Sorting by
+    # priority first keeps a high-priority message from waiting behind its
+    # batch. Per-key order is safe: the claim never selects two of one key.
+    rows.sort(key=lambda row: (-row[12], row[0]))
+    return [
         Claim(
             id=row[0],
             attempts=row[1],
@@ -101,8 +106,6 @@ def claim(
         )
         for row in rows
     ]
-    # RETURNING has no defined order; hand them back in queue order.
-    return sorted(claims, key=lambda c: c.id)
 
 
 # Every write-back is fenced on (id, attempts, locked_by). If this worker's
@@ -150,12 +153,17 @@ def schedule_retry(
 
 
 def mark_dead(alias: str, claim: Claim, *, worker: str, error: str, traceback: str) -> bool:
-    """Park a message that has run out of attempts; only a requeue brings it back."""
+    """Park a message that has run out of attempts; only a requeue brings it back.
+
+    Clears ``unique_key``: a dead row must not hold the key against a fresh
+    enqueue, nor collide with it when requeued.
+    """
     with connections[alias].cursor() as cursor:
         cursor.execute(
             f"""
             UPDATE {TABLE}
             SET status = 'dead',
+                unique_key = NULL,
                 completed_at = now(),
                 locked_until = NULL,
                 locked_by = '',

@@ -22,6 +22,26 @@ from django.dispatch import receiver
 Backoff = Literal["exponential", "fixed"]
 BACKOFF_STRATEGIES: tuple[str, ...] = get_args(Backoff)
 
+OnConflict = Literal["skip", "replace"]
+ON_CONFLICT_CHOICES: tuple[str, ...] = get_args(OnConflict)
+
+# OutboxMessage.priority is a smallint.
+PRIORITY_MIN, PRIORITY_MAX = -32768, 32767
+
+
+def check_priority(priority: int) -> int:
+    if (
+        isinstance(priority, bool)
+        or not isinstance(priority, int)
+        or not PRIORITY_MIN <= priority <= PRIORITY_MAX
+    ):
+        raise ValueError(
+            f"priority must be an integer between {PRIORITY_MIN} and {PRIORITY_MAX}, "
+            f"got {priority!r}."
+        )
+    return priority
+
+
 SETTING_NAME = "RELIABLE_OUTBOX"
 
 LOCAL_DESTINATION = "reliable_outbox.destinations.local.LocalHandlers"

@@ -1,9 +1,9 @@
 [project]
 name = "django-reliable-outbox"
-version = "0.1.1"
+version = "0.2.0"
 description = "Transactional outbox and reliable background jobs for Django on PostgreSQL."
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "Mohammad Zarif", email = "m.zarif1996@gmail.com" }]
 requires-python = ">=3.12"
@@ -32,6 +32,8 @@ dependencies = ["Django>=5.2,<6.1"]
 psycopg = ["psycopg[binary]>=3.2"]
 redis = ["redis>=5.0"]
 kafka = ["confluent-kafka>=2.4"]
+prometheus = ["prometheus-client>=0.20"]
+opentelemetry = ["opentelemetry-api>=1.27"]
 
 [project.urls]
 Homepage = "https://github.com/CtrlAltDevelop/django-reliable-outbox"
@@ -43,6 +45,8 @@ Issues = "https://github.com/CtrlAltDevelop/django-reliable-outbox/issues"
 dev = [
     "psycopg[binary]>=3.2",
     "redis>=5.0",
+    "prometheus-client>=0.20",
+    "opentelemetry-sdk>=1.27",
     "pytest>=8.3",
     "pytest-django>=4.9",
     "ruff>=0.8",

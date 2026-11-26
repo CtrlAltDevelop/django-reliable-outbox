@@ -45,6 +45,17 @@ class OutboxMessage(models.Model):
         help_text="Messages sharing a key are processed one at a time, in insertion order.",
     )
     destination = models.CharField(max_length=100, blank=True)
+    priority = models.SmallIntegerField(
+        db_default=0,
+        help_text="Higher is claimed first. Never overtakes an older message with the same key.",
+    )
+    # NULL means "not deduplicated". Unique per (name, unique_key) among pending rows.
+    unique_key = models.CharField(  # noqa: DJ001
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="At most one pending message per name and unique key.",
+    )
 
     status = models.CharField(max_length=9, choices=Status.choices, default=Status.PENDING)
     attempts = models.PositiveIntegerField(default=0)
@@ -62,12 +73,20 @@ class OutboxMessage(models.Model):
 
     class Meta:
         verbose_name = "outbox message"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "unique_key"],
+                condition=models.Q(status="pending", unique_key__isnull=False),
+                name="outbox_unique_pending",
+            )
+        ]
         indexes = [
-            # The claim query walks pending rows in id order and stops at LIMIT;
-            # without this partial index it would wade through every delivered row.
+            # The claim query walks pending rows in (priority, id) order and stops
+            # at LIMIT; without this partial index it would wade through every
+            # delivered row.
             models.Index(
-                fields=["id"],
-                name="outbox_pending_idx",
+                fields=["-priority", "id"],
+                name="outbox_pending_prio_idx",
                 condition=models.Q(status="pending"),
             ),
             # Answers "is there an older unfinished message with this key?".

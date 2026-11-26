@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import random
@@ -18,16 +19,27 @@ from .backoff import retry_delay
 from .conf import get_settings
 from .destinations import get_destination
 from .exceptions import PermanentError
-from .jobs import get_job
+from .jobs import UnknownJob, get_job
 from .models import Kind
 from .queries import Claim
 from .signals import message_dead_lettered, message_delivered, message_failed
+from .timeouts import deadline
 from .waiting import make_waiter
 
 logger = logging.getLogger(__name__)
 
 _TRACEBACK_LIMIT = 20_000
 _NAME_LIMIT = 100  # OutboxMessage.locked_by
+
+
+@functools.cache
+def _warn_timeout_beyond_lease(name: str, timeout: float, lease: float) -> None:
+    logger.warning(
+        "Job %s has timeout=%gs but the lease is %gs: another worker may claim it mid-run.",
+        name,
+        timeout,
+        lease,
+    )
 
 
 class LeaseLost(Exception):
@@ -155,15 +167,28 @@ class Worker:
 
     def _dispatch(self, claim: Claim) -> None:
         if claim.kind == Kind.JOB:
-            get_job(claim.envelope.name).run(claim.envelope.payload)
+            entry = get_job(claim.envelope.name)
+            if entry.timeout is not None and entry.timeout >= self.lease_seconds:
+                _warn_timeout_beyond_lease(entry.name, entry.timeout, self.lease_seconds)
+            with deadline(entry.timeout, label=f"Job {entry.name}"):
+                entry.run(claim.envelope.payload)
         else:
             get_destination(claim.destination).deliver(claim.envelope)
+
+    @staticmethod
+    def _is_permanent(claim: Claim, exc: Exception) -> bool:
+        if claim.kind == Kind.JOB:
+            try:
+                return get_job(claim.envelope.name).is_permanent(exc)
+            except UnknownJob:
+                pass  # a deploy in progress: fall through and let it retry
+        return isinstance(exc, PermanentError)
 
     def _handle_failure(self, claim: Claim, exc: Exception) -> None:
         envelope = claim.envelope
         error = f"{type(exc).__name__}: {exc}"
         trace = "".join(traceback.format_exception(exc))[-_TRACEBACK_LIMIT:]
-        if isinstance(exc, PermanentError) or claim.attempts >= envelope.max_attempts:
+        if self._is_permanent(claim, exc) or claim.attempts >= envelope.max_attempts:
             recorded = queries.mark_dead(
                 self.alias, claim, worker=self.name, error=error, traceback=trace
             )

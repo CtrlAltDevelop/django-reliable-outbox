@@ -1,9 +1,12 @@
 # django-reliable-outbox
 
 [![CI](https://github.com/CtrlAltDevelop/django-reliable-outbox/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
+[![PyPI](https://img.shields.io/pypi/v/django-reliable-outbox.svg)](https://pypi.org/project/django-reliable-outbox/)
+[![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/blob/main/LICENSE)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Django](https://img.shields.io/badge/django-5.2%20%7C%206.0-green)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-15%20%7C%2016%20%7C%2017-336791)
+[![last commit](https://img.shields.io/github/last-commit/CtrlAltDevelop/django-reliable-outbox.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/commits)
 
 A transactional outbox and reliable background jobs for Django on PostgreSQL.
 Publish an event or enqueue a job **in the same transaction** as the data it's
@@ -130,6 +133,7 @@ publish(
     delay=timedelta(minutes=5), # or run_at=aware_datetime
     headers={"trace_id": "..."},
     max_attempts=20,            # default: RELIABLE_OUTBOX["MAX_ATTEMPTS"]
+    priority=10,                # higher is claimed first (default 0)
 )                               # returns the message_id (UUID)
 ```
 
@@ -152,6 +156,42 @@ charge(7, amount_cents=1250)          # still callable inline
 `retries=5` means up to six runs. Name jobs explicitly if you might move the
 function while messages for it are queued; the default name is `module.qualname`.
 
+Per-job policy goes on the decorator:
+
+```python
+@job(
+    retries=5,
+    timeout=30,                          # seconds; raises JobTimeout, retried like any failure
+    retry_on=(ConnectionError, TimeoutError),  # retry only these; anything else is dead at once
+    dont_retry_on=(KeyError,),           # dead at once, like PermanentError (wins over retry_on)
+    priority=5,                          # default priority of this job's messages
+)
+def sync_customer(customer_id: int) -> None: ...
+```
+
+`timeout` uses `SIGALRM`, so it is enforced on a worker's main thread only:
+run timed jobs on a `--concurrency 1` worker. With `--concurrency` above 1 (or
+on Windows) the limit is skipped, with a warning.
+
+**Priority.** Workers claim the highest `priority` first, oldest first within
+a priority. Priority never lifts a message past an older one with the same
+`key`: per-key order always wins.
+
+**Unique and debounced jobs.** `unique_key` allows one pending copy of a job
+per key:
+
+```python
+reindex.enqueue_with(args=[42], unique_key="product-42")           # a repeat is a no-op
+reindex.enqueue_with(args=[42], unique_key="product-42",
+                     on_conflict="replace", delay=timedelta(seconds=30))  # debounce
+```
+
+A repeat while the first is pending or running returns the existing
+`message_id`. With `on_conflict="replace"` it swaps in the new arguments and
+schedule, unless a worker already has the first one leased, in which case that
+run goes ahead untouched and the repeat is dropped. The key is scoped to the
+job's name and frees up once the message is delivered or dead.
+
 ### Failures
 
 Any exception is a failed attempt, retried after
@@ -159,7 +199,8 @@ Any exception is a failed attempt, retried after
 seconds ([full jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)),
 or `BACKOFF_BASE_SECONDS` with `backoff="fixed"`. Raise
 `reliable_outbox.PermanentError` for input that will never succeed, and the
-message goes straight to the dead-letter state. Dead messages keep their last
+message goes straight to the dead-letter state (jobs can also list exception
+types in `retry_on` / `dont_retry_on`). Dead messages keep their last
 error and traceback, and can be requeued with fresh attempts:
 
 ```bash
@@ -269,11 +310,33 @@ inspected; run `outbox_cleanup` from cron. Deletes are batched to keep locks
 and WAL bursts short. At very high volume, partition the table by
 `created_at` and drop old partitions instead.
 
-For metrics, connect to `reliable_outbox.signals.message_delivered`
+For metrics, install a ready-made exporter or connect to the signals yourself.
+
+```bash
+pip install "django-reliable-outbox[prometheus]"      # or [opentelemetry]
+```
+
+```python
+# e.g. in an AppConfig.ready() or the module that starts your worker
+from reliable_outbox.metrics import prometheus      # or: opentelemetry
+prometheus.install()
+```
+
+Both export `outbox_delivered_total`, `outbox_failed_total` and
+`outbox_dead_lettered_total` (labelled `kind` and `name`), `outbox_run_seconds`
+and `outbox_queued_seconds` histograms, and queue gauges `outbox_queue_ready`,
+`_in_flight`, `_scheduled`, `_retrying`, `_dead`, `_delivered` and
+`_oldest_ready_seconds`. (OpenTelemetry uses dotted names:
+`outbox.messages.delivered`, `outbox.queue.ready`, ...) Counters and histograms
+fill in the process that runs the worker, so expose them there (for Prometheus,
+`prometheus_client.start_http_server`); the gauges are read from the database
+at scrape time, so any process serving a scrape can export them.
+
+To roll your own, connect to `reliable_outbox.signals.message_delivered`
 (`envelope`, `duration`, `queued_for`), `message_failed` (`envelope`, `error`,
 `retry_in`) and `message_dead_lettered` (`envelope`, `error`), or export
-`reliable_outbox.operations.stats()` from a scrape endpoint.
-`oldest_ready_seconds` is the number to alert on.
+`reliable_outbox.operations.stats()`. `oldest_ready_seconds` is the number to
+alert on.
 
 The Django admin lists messages with filters for status and for derived states
 (ready, in flight, scheduled, retrying), search by `message_id`, key, name or
@@ -388,4 +451,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
 
 ## License
 
-MIT © 2026 Mohammad Zarif
+[AGPL-3.0-only](LICENSE) © 2026 Mohammad Zarif
