@@ -3,7 +3,7 @@
 [![CI](https://github.com/CtrlAltDevelop/django-reliable-outbox/actions/workflows/ci.yml/badge.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/django-reliable-outbox.svg)](https://pypi.org/project/django-reliable-outbox/)
 [![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/blob/main/LICENSE)
-![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
+![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Django](https://img.shields.io/badge/django-5.2%20%7C%206.0-green)
 ![PostgreSQL](https://img.shields.io/badge/postgresql-15%20%7C%2016%20%7C%2017-336791)
 [![last commit](https://img.shields.io/github/last-commit/CtrlAltDevelop/django-reliable-outbox.svg)](https://github.com/CtrlAltDevelop/django-reliable-outbox/commits)
